@@ -1,0 +1,5 @@
+Frontend (React) ←→ Backend (Express) ←→ Supabase (Database)
+     ↓                    ↓                    ↓
+- UI/UX              - Authentication      - Data Storage
+- Read data          - Session mgmt       - RLS Security  
+- User interactions  - Password hashing   - Audit logs
