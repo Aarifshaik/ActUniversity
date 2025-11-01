@@ -3,14 +3,64 @@ import { supabase } from '../lib/supabase';
 import { Employee, Course, Session, AuditLog } from '../lib/types';
 import { getStoredSession, isAdmin } from '../lib/auth';
 import { formatAuditLogTime, formatSessionTime, formatLastLoginDate, formatForCSV } from '../lib/dateUtils';
-import { Card } from '../components/Card';
-import { Button } from '../components/Button';
-import { Badge } from '../components/Badge';
-import { Input } from '../components/Input';
 import {
-  Users, BookOpen, Activity, AlertTriangle,
-  BarChart3, Download, Power, Clock, Plus, Edit, Trash2, UserPlus, Search, Filter
+  Users, BookOpen, Activity, AlertTriangle, BarChart3, Download, Power, Clock,
+  Plus, Edit, Trash2, Search, Filter, ArrowLeft, Shield, TrendingUp, CheckCircle
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+} from '@/components/ui/sidebar';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 export function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<'overview' | 'courses' | 'employees'>('overview');
@@ -41,7 +91,6 @@ export function AdminDashboard() {
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
 
-  // Search and filter states
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeeRoleFilter, setEmployeeRoleFilter] = useState<'all' | 'admin' | 'employee'>('all');
   const [courseSearch, setCourseSearch] = useState('');
@@ -49,18 +98,13 @@ export function AdminDashboard() {
 
   const session = getStoredSession();
 
-  // Keyboard shortcuts for search
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl/Cmd + K to focus search
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         const searchInput = document.querySelector('input[placeholder*="Search"]') as HTMLInputElement;
-        if (searchInput) {
-          searchInput.focus();
-        }
+        if (searchInput) searchInput.focus();
       }
-      // Escape to clear search
       if (e.key === 'Escape') {
         if (activeTab === 'courses') {
           setCourseSearch('');
@@ -92,7 +136,6 @@ export function AdminDashboard() {
     if (!session?.token) return;
 
     try {
-      // Fetch stats and dashboard data from backend API
       const [statsResponse, dashboardResponse] = await Promise.all([
         fetch('/api/admin/stats', {
           headers: {
@@ -130,7 +173,6 @@ export function AdminDashboard() {
 
     } catch (error) {
       console.error('Failed to load admin data:', error);
-      // Fallback to direct Supabase queries if backend fails
       try {
         const [employeesData, coursesData, sessionsData, logsData] = await Promise.all([
           supabase.from('employees').select('*').order('created_at', { ascending: false }),
@@ -147,7 +189,6 @@ export function AdminDashboard() {
             .limit(20),
         ]);
 
-        // Basic stats calculation as fallback
         setStats({
           totalEmployees: employeesData.data?.length || 0,
           activeEmployees: employeesData.data?.filter(e => e.is_active).length || 0,
@@ -180,28 +221,31 @@ export function AdminDashboard() {
 
   const forceLogout = async (sessionId: string) => {
     try {
-      await supabase
-        .from('sessions')
-        .update({ is_active: false, logout_reason: 'admin_forced' })
-        .eq('id', sessionId);
-
-      await supabase.from('audit_logs').insert({
-        employee_id: session?.employee.id,
-        session_id: session?.sessionId,
-        event_type: 'force_logout',
-        event_category: 'admin',
-        resource_type: 'session',
-        resource_id: sessionId,
-        action_details: { reason: 'Forced by admin' },
-        ip_address: '',
-        user_agent: navigator.userAgent,
-        severity: 'warning',
+      const response = await fetch(`/api/admin/sessions/${sessionId}/force-logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.token}`
+        }
       });
 
+      if (!response.ok) {
+        const error = await response.json();
+        if (error.code === 'SELF_SESSION_LOGOUT_DENIED') {
+          alert('⚠️ You cannot force logout your own current session. Use the regular logout button instead.');
+          return;
+        }
+        throw new Error(error.message || 'Failed to force logout');
+      }
+
+      const result = await response.json();
+      console.log('Force logout successful:', result);
+
+      // Reload admin data to reflect the changes
       loadAdminData();
-      // alert("Loaded")
     } catch (error) {
       console.error('Failed to force logout:', error);
+      alert('Failed to force logout: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
@@ -258,7 +302,7 @@ export function AdminDashboard() {
         setCourses([result.data, ...courses]);
         setShowCourseForm(false);
         setEditingCourse(null);
-        loadAdminData(); // Refresh stats
+        loadAdminData();
       }
     } catch (error) {
       console.error('Failed to create course:', error);
@@ -317,7 +361,7 @@ export function AdminDashboard() {
 
       if (result.success) {
         setCourses(courses.filter(c => c.id !== courseId));
-        loadAdminData(); // Refresh stats
+        loadAdminData();
       }
     } catch (error) {
       console.error('Failed to delete course:', error);
@@ -347,7 +391,7 @@ export function AdminDashboard() {
         setEmployees([result.data, ...employees]);
         setShowEmployeeForm(false);
         setEditingEmployee(null);
-        loadAdminData(); // Refresh stats
+        loadAdminData();
       }
     } catch (error) {
       console.error('Failed to create employee:', error);
@@ -386,7 +430,6 @@ export function AdminDashboard() {
   };
 
   const deleteEmployee = async (employeeId: string, employeeName: string) => {
-    // Prevent self-deactivation
     if (employeeId === session?.employee.id) {
       alert('You cannot deactivate your own account.');
       return;
@@ -411,13 +454,12 @@ export function AdminDashboard() {
       }
 
       if (result.success) {
-        // Update the employee list to reflect the deactivation
-        setEmployees(employees.map(e => 
-          e.id === employeeId 
+        setEmployees(employees.map(e =>
+          e.id === employeeId
             ? { ...e, is_active: false, updated_at: new Date().toISOString() }
             : e
         ));
-        loadAdminData(); // Refresh stats
+        loadAdminData();
       }
     } catch (error) {
       console.error('Failed to deactivate employee:', error);
@@ -426,624 +468,744 @@ export function AdminDashboard() {
     }
   };
 
-  const reactivateEmployee = async (employeeId: string, employeeName: string) => {
-    if (!confirm(`Are you sure you want to reactivate ${employeeName}? This will enable their account.`)) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/admin/employees/${employeeId}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${session?.token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ is_active: true }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || 'Failed to reactivate employee');
-      }
-
-      if (result.success) {
-        setEmployees(employees.map(e => e.id === employeeId ? result.data : e));
-        loadAdminData(); // Refresh stats
-      }
-    } catch (error) {
-      console.error('Failed to reactivate employee:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to reactivate employee. Please try again.';
-      alert(errorMessage);
-    }
-  };
-
-  // Filter and search functions
   const filteredEmployees = employees.filter(employee => {
-    // Search filter (emp_id or full_name)
-    const searchMatch = employeeSearch === '' || 
+    const searchMatch = employeeSearch === '' ||
       employee.emp_id.toLowerCase().includes(employeeSearch.toLowerCase()) ||
       employee.full_name.toLowerCase().includes(employeeSearch.toLowerCase());
-    
-    // Role filter
+
     const roleMatch = employeeRoleFilter === 'all' || employee.role === employeeRoleFilter;
-    
+
     return searchMatch && roleMatch;
   });
 
   const filteredCourses = courses.filter(course => {
-    // Search filter (title)
-    const searchMatch = courseSearch === '' || 
+    const searchMatch = courseSearch === '' ||
       course.title.toLowerCase().includes(courseSearch.toLowerCase());
-    
-    // Difficulty filter
+
     const difficultyMatch = courseDifficultyFilter === 'all' || course.difficulty_level === courseDifficultyFilter;
-    
+
     return searchMatch && difficultyMatch;
   });
 
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F7FAFC] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B63D6] mx-auto mb-4"></div>
-          <p className="text-[#64748B]">Loading admin dashboard...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading admin dashboard...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F7FAFC]">
-      <header className="bg-white border-b border-[#E2E8F0]">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-[#0F1724]">Admin Dashboard</h1>
-              <p className="text-sm text-[#64748B]">System monitoring and management</p>
+    <SidebarProvider>
+      <div className="flex min-h-screen w-full">
+        <Sidebar>
+          <SidebarHeader>
+            <div className="flex items-center gap-2 px-2 py-2">
+              <div className="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-md">
+                <Shield className="size-5" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-semibold text-sm">Admin Panel</span>
+                <span className="text-xs text-muted-foreground">Management</span>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Button variant="secondary" onClick={() => {
-                const event = new CustomEvent('navigateToDashboard');
-                window.dispatchEvent(event);
-              }}>
-                Back to Dashboard
-              </Button>
+          </SidebarHeader>
+          <SidebarContent>
+            <SidebarGroup>
+              <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => setActiveTab('overview')}
+                      isActive={activeTab === 'overview'}
+                    >
+                      <BarChart3 className="size-4" />
+                      <span>Overview</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => setActiveTab('courses')}
+                      isActive={activeTab === 'courses'}
+                    >
+                      <BookOpen className="size-4" />
+                      <span>Courses</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => setActiveTab('employees')}
+                      isActive={activeTab === 'employees'}
+                    >
+                      <Users className="size-4" />
+                      <span>Employees</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </SidebarContent>
+          <SidebarFooter>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <SidebarMenuButton className="w-full">
+                      <Avatar className="h-6 w-6">
+                        <AvatarFallback className="text-xs">
+                          {getInitials(session?.employee.full_name || 'Admin')}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex flex-col items-start text-left">
+                        <span className="text-sm font-medium truncate max-w-[150px]">
+                          {session?.employee.full_name}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          Administrator
+                        </span>
+                      </div>
+                    </SidebarMenuButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel>Admin Account</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => {
+                      const event = new CustomEvent('navigateToDashboard');
+                      window.dispatchEvent(event);
+                    }}>
+                      <ArrowLeft className="mr-2 h-4 w-4" />
+                      Back to Dashboard
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarFooter>
+        </Sidebar>
+
+        <main className="flex-1 overflow-auto">
+          <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <div className="flex h-16 items-center gap-4 px-6">
+              <SidebarTrigger />
+              <Separator orientation="vertical" className="h-6" />
+              <div className="flex-1">
+                <h1 className="text-xl font-semibold">Admin Dashboard</h1>
+                <p className="text-xs text-muted-foreground">System monitoring and management</p>
+              </div>
+              <ThemeToggle />
             </div>
-          </div>
+          </header>
 
-          <div className="flex gap-1 mt-4">
-            <Button
-              variant={activeTab === 'overview' ? 'primary' : 'ghost'}
-              onClick={() => setActiveTab('overview')}
-            >
-              Overview
-            </Button>
-            <Button
-              variant={activeTab === 'courses' ? 'primary' : 'ghost'}
-              onClick={() => setActiveTab('courses')}
-            >
-              Courses
-            </Button>
-            <Button
-              variant={activeTab === 'employees' ? 'primary' : 'ghost'}
-              onClick={() => setActiveTab('employees')}
-            >
-              Employees
-            </Button>
-          </div>
-        </div>
-      </header>
+          <div className="p-6 space-y-6">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
+              <TabsList>
+                <TabsTrigger value="overview">Overview</TabsTrigger>
+                <TabsTrigger value="courses">Courses</TabsTrigger>
+                <TabsTrigger value="employees">Employees</TabsTrigger>
+              </TabsList>
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        {activeTab === 'overview' && (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              <Card>
-                <div className="flex items-center justify-between mb-2">
-                  <Users className="w-8 h-8 text-[#0B63D6]" />
-                </div>
-                <p className="text-3xl font-bold text-[#0F1724] mb-1">{stats.totalEmployees}</p>
-                <p className="text-sm text-[#64748B]">Total Employees</p>
-                <div className="flex items-center justify-between mt-2 text-xs">
-                  <span className="text-[#10B981]">{stats.activeEmployees} active</span>
-                  <span className="text-[#64748B]">{stats.inactiveEmployees} inactive</span>
-                </div>
-                {stats.newEmployeesThisMonth > 0 && (
-                  <p className="text-xs text-[#3B82F6] mt-1">+{stats.newEmployeesThisMonth} this month</p>
-                )}
-              </Card>
+              <TabsContent value="overview" className="space-y-6">
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                  <Card className="border-l-4 border-accent-blue">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Total Employees</CardTitle>
+                      <div className="bg-accent-blue/10 p-2 rounded-lg">
+                        <Users className="h-4 w-4 text-accent-blue" />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{stats.totalEmployees}</div>
+                      <div className="flex items-center justify-between text-xs mt-1">
+                        <span className="text-accent-green">{stats.activeEmployees} active</span>
+                        <span className="text-muted-foreground">{stats.inactiveEmployees} inactive</span>
+                      </div>
+                      {stats.newEmployeesThisMonth > 0 && (
+                        <p className="text-xs text-accent-blue mt-1">+{stats.newEmployeesThisMonth} this month</p>
+                      )}
+                    </CardContent>
+                  </Card>
 
-              <Card>
-                <div className="flex items-center justify-between mb-2">
-                  <BookOpen className="w-8 h-8 text-[#10B981]" />
-                </div>
-                <p className="text-3xl font-bold text-[#0F1724] mb-1">{stats.totalCourses}</p>
-                <p className="text-sm text-[#64748B]">Total Courses</p>
-                <div className="flex items-center justify-between mt-2 text-xs">
-                  <span className="text-[#10B981]">{stats.publishedCourses} published</span>
-                  <span className="text-[#F59E0B]">{stats.draftCourses} drafts</span>
-                </div>
-                {stats.newCoursesThisMonth > 0 && (
-                  <p className="text-xs text-[#3B82F6] mt-1">+{stats.newCoursesThisMonth} this month</p>
-                )}
-              </Card>
+                  <Card className="border-l-4 border-accent-purple">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Total Courses</CardTitle>
+                      <div className="bg-accent-purple/10 p-2 rounded-lg">
+                        <BookOpen className="h-4 w-4 text-accent-purple" />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{stats.totalCourses}</div>
+                      <div className="flex items-center justify-between text-xs mt-1">
+                        <span className="text-accent-green">{stats.publishedCourses} published</span>
+                        <span className="text-accent-orange">{stats.draftCourses} drafts</span>
+                      </div>
+                      {stats.newCoursesThisMonth > 0 && (
+                        <p className="text-xs text-accent-purple mt-1">+{stats.newCoursesThisMonth} this month</p>
+                      )}
+                    </CardContent>
+                  </Card>
 
-              <Card>
-                <div className="flex items-center justify-between mb-2">
-                  <Activity className="w-8 h-8 text-[#3B82F6]" />
-                </div>
-                <p className="text-3xl font-bold text-[#0F1724] mb-1">{stats.activeSessions}</p>
-                <p className="text-sm text-[#64748B]">Active Sessions</p>
-                <p className="text-xs text-[#10B981] mt-1">{stats.uniqueActiveUsers} unique users online</p>
-              </Card>
+                  <Card className="border-l-4 border-accent-green">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
+                      <div className="bg-accent-green/10 p-2 rounded-lg">
+                        <Activity className="h-4 w-4 text-accent-green" />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{stats.activeSessions}</div>
+                      <p className="text-xs text-accent-green mt-1">{stats.uniqueActiveUsers} unique users online</p>
+                    </CardContent>
+                  </Card>
 
-              <Card>
-                <div className="flex items-center justify-between mb-2">
-                  <BarChart3 className="w-8 h-8 text-[#F59E0B]" />
-                </div>
-                <p className="text-3xl font-bold text-[#0F1724] mb-1">{stats.totalLearningTimeMinutes}</p>
-                <p className="text-sm text-[#64748B]">Learning Minutes</p>
-                <div className="flex items-center justify-between mt-2 text-xs">
-                  <span className="text-[#10B981]">{stats.totalCompletions} completed</span>
-                  <span className="text-[#3B82F6]">{stats.totalInProgress} in progress</span>
-                </div>
-              </Card>
-            </div>
-
-            {/* Additional stats row */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <Card>
-                <div className="flex items-center justify-between mb-2">
-                  <AlertTriangle className="w-8 h-8 text-[#EF4444]" />
-                </div>
-                <p className="text-3xl font-bold text-[#0F1724] mb-1">{stats.criticalEventsToday}</p>
-                <p className="text-sm text-[#64748B]">Critical Events Today</p>
-              </Card>
-
-              <Card>
-                <div className="flex items-center justify-between mb-2">
-                  <Clock className="w-8 h-8 text-[#8B5CF6]" />
-                </div>
-                <p className="text-3xl font-bold text-[#0F1724] mb-1">{stats.recentEventsCount}</p>
-                <p className="text-sm text-[#64748B]">Recent System Events</p>
-              </Card>
-
-              <Card>
-                <div className="flex items-center justify-between mb-2">
-                  <Activity className="w-8 h-8 text-[#06B6D4]" />
-                </div>
-                <p className="text-3xl font-bold text-[#0F1724] mb-1">
-                  {stats.totalEmployees > 0 ? Math.round((stats.activeEmployees / stats.totalEmployees) * 100) : 0}%
-                </p>
-                <p className="text-sm text-[#64748B]">Employee Activity Rate</p>
-              </Card>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-              <Card>
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-bold text-[#0F1724]">Active Sessions</h2>
-                  <Badge variant="info">{activeSessions.length} online</Badge>
+                  <Card className="border-l-4 border-accent-cyan">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Learning Time</CardTitle>
+                      <div className="bg-accent-cyan/10 p-2 rounded-lg">
+                        <Clock className="h-4 w-4 text-accent-cyan" />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{stats.totalLearningTimeMinutes}</div>
+                      <div className="flex items-center justify-between text-xs mt-1">
+                        <span className="text-accent-green">{stats.totalCompletions} completed</span>
+                        <span className="text-accent-blue">{stats.totalInProgress} in progress</span>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </div>
 
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {activeSessions.length === 0 ? (
-                    <p className="text-center text-[#64748B] py-8">No active sessions</p>
-                  ) : (
-                    activeSessions.map((sessionData) => (
-                      <div
-                        key={sessionData.id}
-                        className="flex items-center justify-between p-4 bg-[#F7FAFC] rounded-lg border border-[#E2E8F0]"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-[#0F1724]">
-                            {sessionData.employee?.full_name || 'Unknown'}
-                          </p>
-                          <p className="text-sm text-[#64748B]">
-                            {sessionData.employee?.emp_id}
-                          </p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Clock className="w-3 h-3 text-[#64748B]" />
-                            <span className="text-xs text-[#64748B]">
-                              Last active: {formatSessionTime(sessionData.last_activity_at)}
-                            </span>
-                          </div>
-                        </div>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => forceLogout(sessionData.id)}
-                        >
-                          <Power className="w-4 h-4" />
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Card className="border-l-4 border-accent-red">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Critical Events</CardTitle>
+                      <div className="bg-accent-red/10 p-2 rounded-lg">
+                        <AlertTriangle className="h-4 w-4 text-accent-red" />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{stats.criticalEventsToday}</div>
+                      <p className="text-xs text-muted-foreground">Today</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-l-4 border-accent-indigo">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">System Events</CardTitle>
+                      <div className="bg-accent-indigo/10 p-2 rounded-lg">
+                        <Activity className="h-4 w-4 text-accent-indigo" />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{stats.recentEventsCount}</div>
+                      <p className="text-xs text-muted-foreground">Recent</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-l-4 border-accent-teal">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Activity Rate</CardTitle>
+                      <div className="bg-accent-teal/10 p-2 rounded-lg">
+                        <TrendingUp className="h-4 w-4 text-accent-teal" />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">
+                        {stats.totalEmployees > 0 ? Math.round((stats.activeEmployees / stats.totalEmployees) * 100) : 0}%
+                      </div>
+                      <p className="text-xs text-muted-foreground">Employee engagement</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="grid gap-6 md:grid-cols-2">
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <CardTitle>Active Sessions</CardTitle>
+                        <Badge className="bg-accent-green text-accent-green-foreground">{activeSessions.length} online</Badge>
+                      </div>
+                      <CardDescription>Currently logged in users</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3 max-h-96 overflow-y-auto">
+                        {activeSessions.length === 0 ? (
+                          <p className="text-center text-muted-foreground py-8">No active sessions</p>
+                        ) : (
+                          activeSessions.map((sessionData) => (
+                            <div
+                              key={sessionData.id}
+                              className="flex items-center justify-between p-3 rounded-lg border"
+                            >
+                              <div className="flex items-center gap-3 flex-1 min-w-0">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarFallback className="text-xs">
+                                    {getInitials(sessionData.employee?.full_name || 'U')}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-medium text-sm truncate">
+                                      {sessionData.employee?.full_name || 'Unknown'}
+                                    </p>
+                                    {sessionData.id === session?.sessionId && (
+                                      <Badge className="bg-accent-blue text-accent-blue-foreground text-xs">
+                                        Current
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-muted-foreground">
+                                    {sessionData.employee?.emp_id}
+                                  </p>
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    <Clock className="w-3 h-3 text-muted-foreground" />
+                                    <span className="text-xs text-muted-foreground">
+                                      {formatSessionTime(sessionData.last_activity_at)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                disabled={sessionData.id === session?.sessionId}
+                                onClick={() => forceLogout(sessionData.id)}
+                                title={
+                                  sessionData.id === session?.sessionId
+                                    ? "Cannot force logout your current session"
+                                    : "Force logout this session"
+                                }
+                              >
+                                <Power className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <CardTitle>Audit Logs</CardTitle>
+                        <Button variant="outline" size="sm" onClick={exportAuditLogs}>
+                          <Download className="w-4 h-4 mr-2" />
+                          Export
                         </Button>
                       </div>
-                    ))
-                  )}
+                      <CardDescription>Recent system events</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2 max-h-96 overflow-y-auto">
+                        {recentLogs.map((log) => (
+                          <div
+                            key={log.id}
+                            className="p-3 rounded-lg border text-sm"
+                          >
+                            <div className="flex items-start justify-between gap-2 mb-1">
+                              <span className="font-medium">{log.event_type}</span>
+                              <Badge
+                                className={`text-xs ${
+                                  log.severity === 'critical' ? 'bg-accent-red text-accent-red-foreground' :
+                                    log.severity === 'warning' ? 'bg-accent-orange text-accent-orange-foreground' : 
+                                    'bg-accent-blue text-accent-blue-foreground'
+                                }`}
+                              >
+                                {log.severity}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {log.event_category} • {formatAuditLogTime(log.created_at)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
                 </div>
-              </Card>
+              </TabsContent>
 
-              <Card>
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-bold text-[#0F1724]">Audit Logs</h2>
-                  <Button variant="secondary" size="sm" onClick={exportAuditLogs}>
-                    <Download className="w-4 h-4 mr-2" />
-                    Export
+              <TabsContent value="courses" className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold tracking-tight">Course Management</h2>
+                    <p className="text-muted-foreground">Manage and organize learning content</p>
+                  </div>
+                  <Button className="bg-accent-purple text-accent-purple-foreground hover:bg-accent-purple/90" onClick={() => setShowCourseForm(true)}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Course
                   </Button>
                 </div>
 
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {recentLogs.map((log) => (
-                    <div
-                      key={log.id}
-                      className="p-3 bg-[#F7FAFC] rounded-lg border border-[#E2E8F0] text-sm"
-                    >
-                      <div className="flex items-start justify-between gap-2 mb-1">
-                        <span className="font-medium text-[#0F1724]">{log.event_type}</span>
-                        <Badge
-                          size="sm"
-                          variant={
-                            log.severity === 'critical' ? 'error' :
-                              log.severity === 'warning' ? 'warning' : 'info'
-                          }
-                        >
-                          {log.severity}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-[#64748B]">
-                        {log.event_category} • {formatAuditLogTime(log.created_at)}
-                      </p>
-                    </div>
-                  ))}
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Search courses by title..."
+                      className="pl-9"
+                      value={courseSearch}
+                      onChange={(e) => setCourseSearch(e.target.value)}
+                    />
+                  </div>
+                  <Select value={courseDifficultyFilter} onValueChange={(v) => setCourseDifficultyFilter(v as any)}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Filter by difficulty" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Difficulties</SelectItem>
+                      <SelectItem value="beginner">Beginner</SelectItem>
+                      <SelectItem value="intermediate">Intermediate</SelectItem>
+                      <SelectItem value="advanced">Advanced</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-              </Card>
-            </div>
-          </>
-        )}
 
-        {activeTab === 'courses' && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-[#0F1724]">Course Management</h2>
-              <Button onClick={() => setShowCourseForm(true)}>
-                <Plus className="w-4 h-4 mr-2" />
-                Add Course
-              </Button>
-            </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    <span>Total: {filteredCourses.length}</span>
+                    <span className="text-accent-green">Published: {filteredCourses.filter(c => c.is_published).length}</span>
+                    <span className="text-accent-orange">Drafts: {filteredCourses.filter(c => !c.is_published).length}</span>
+                  </div>
+                  {(courseSearch || courseDifficultyFilter !== 'all') && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setCourseSearch('');
+                        setCourseDifficultyFilter('all');
+                      }}
+                    >
+                      Clear Filters
+                    </Button>
+                  )}
+                </div>
 
-            {/* Course Search and Filter */}
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#64748B]" />
-                <input
-                  type="text"
-                  placeholder="Search courses by title..."
-                  className="w-full pl-10 pr-10 py-2 border border-[#E2E8F0] rounded-lg focus:ring-2 focus:ring-[#0B63D6] focus:border-transparent"
-                  value={courseSearch}
-                  onChange={(e) => setCourseSearch(e.target.value)}
-                />
-                {courseSearch && (
-                  <button
-                    onClick={() => setCourseSearch('')}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[#64748B] hover:text-[#0F1724]"
-                  >
-                    ×
-                  </button>
+                {filteredCourses.length === 0 ? (
+                  <Card>
+                    <CardContent className="flex flex-col items-center justify-center py-12">
+                      <BookOpen className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+                      <p className="text-muted-foreground">
+                        {courseSearch || courseDifficultyFilter !== 'all'
+                          ? 'No courses match your search criteria.'
+                          : 'No courses available.'}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Course</TableHead>
+                          <TableHead>Category</TableHead>
+                          <TableHead>Difficulty</TableHead>
+                          <TableHead>Duration</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredCourses.map((course) => (
+                          <TableRow key={course.id}>
+                            <TableCell>
+                              <div>
+                                <p className="font-medium">{course.title}</p>
+                                <p className="text-sm text-muted-foreground line-clamp-1">
+                                  {course.description}
+                                </p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge className="bg-accent-cyan/10 text-accent-cyan border-accent-cyan/20">{course.category}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={
+                                course.difficulty_level === 'beginner' ? 'bg-accent-green text-accent-green-foreground' :
+                                  course.difficulty_level === 'intermediate' ? 'bg-accent-orange text-accent-orange-foreground' :
+                                    'bg-accent-red text-accent-red-foreground'
+                              }>
+                                {course.difficulty_level}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{course.estimated_duration_minutes} min</TableCell>
+                            <TableCell>
+                              {course.is_published ? (
+                                <Badge className="bg-accent-green text-accent-green-foreground">
+                                  <CheckCircle className="w-3 h-3 mr-1" />
+                                  Published
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-accent-orange text-accent-orange-foreground">Draft</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setEditingCourse(course);
+                                    setShowCourseForm(true);
+                                  }}
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => deleteCourse(course.id)}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
-              </div>
-              <div className="sm:w-48 relative">
-                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#64748B]" />
-                <select
-                  className="w-full pl-10 pr-4 py-2 border border-[#E2E8F0] rounded-lg focus:ring-2 focus:ring-[#0B63D6] focus:border-transparent appearance-none bg-white"
-                  value={courseDifficultyFilter}
-                  onChange={(e) => setCourseDifficultyFilter(e.target.value as any)}
-                >
-                  <option value="all">All Difficulties</option>
-                  <option value="beginner">Beginner</option>
-                  <option value="intermediate">Intermediate</option>
-                  <option value="advanced">Advanced</option>
-                </select>
-              </div>
-            </div>
+              </TabsContent>
 
-            {/* Course Stats and Clear Filters */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4 text-sm text-[#64748B]">
-                <span>Total: {filteredCourses.length}</span>
-                <span className="text-[#10B981]">Published: {filteredCourses.filter(c => c.is_published).length}</span>
-                <span className="text-[#F59E0B]">Drafts: {filteredCourses.filter(c => !c.is_published).length}</span>
-              </div>
-              {(courseSearch || courseDifficultyFilter !== 'all') && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setCourseSearch('');
-                    setCourseDifficultyFilter('all');
-                  }}
-                >
-                  Clear Filters
-                </Button>
-              )}
-            </div>
-
-            <div className="grid gap-4">
-              {filteredCourses.length === 0 ? (
-                <Card>
-                  <div className="text-center py-8 text-[#64748B]">
-                    {courseSearch || courseDifficultyFilter !== 'all' 
-                      ? 'No courses match your search criteria.' 
-                      : 'No courses available.'}
+              <TabsContent value="employees" className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold tracking-tight">Employee Management</h2>
+                    <p className="text-muted-foreground">Manage user accounts and permissions</p>
                   </div>
-                </Card>
-              ) : (
-                filteredCourses.map((course) => (
-                <Card key={course.id}>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-lg font-semibold text-[#0F1724]">{course.title}</h3>
-                        <Badge variant={course.is_published ? 'success' : 'warning'}>
-                          {course.is_published ? 'Published' : 'Draft'}
-                        </Badge>
-                      </div>
-                      <p className="text-[#64748B] mb-2">{course.description}</p>
-                      <div className="flex items-center gap-4 text-sm text-[#64748B]">
-                        <span>Category: {course.category || 'Uncategorized'}</span>
-                        <span>Duration: {course.estimated_duration_minutes} min</span>
-                        <span>Level: {course.difficulty_level}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                          setEditingCourse(course);
-                          setShowCourseForm(true);
-                        }}
-                      >
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={() => deleteCourse(course.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
+                  <Button className="bg-accent-blue text-accent-blue-foreground hover:bg-accent-blue/90" onClick={() => setShowEmployeeForm(true)}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Employee
+                  </Button>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Search by name or employee ID..."
+                      className="pl-9"
+                      value={employeeSearch}
+                      onChange={(e) => setEmployeeSearch(e.target.value)}
+                    />
                   </div>
-                </Card>
-                ))
-              )}
-            </div>
-          </div>
-        )}
+                  <Select value={employeeRoleFilter} onValueChange={(v) => setEmployeeRoleFilter(v as any)}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Filter by role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Roles</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="employee">Employee</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-        {activeTab === 'employees' && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-[#0F1724]">Employee Management</h2>
-              <Button onClick={() => setShowEmployeeForm(true)}>
-                <UserPlus className="w-4 h-4 mr-2" />
-                Add Employee
-              </Button>
-            </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    <span>Total: {filteredEmployees.length}</span>
+                    <span className="text-accent-green">Active: {filteredEmployees.filter(e => e.is_active).length}</span>
+                    <span className="text-accent-red">Inactive: {filteredEmployees.filter(e => !e.is_active).length}</span>
+                  </div>
+                  {(employeeSearch || employeeRoleFilter !== 'all') && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEmployeeSearch('');
+                        setEmployeeRoleFilter('all');
+                      }}
+                    >
+                      Clear Filters
+                    </Button>
+                  )}
+                </div>
 
-            {/* Employee Search and Filter */}
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#64748B]" />
-                <input
-                  type="text"
-                  placeholder="Search by Employee ID or Name..."
-                  className="w-full pl-10 pr-10 py-2 border border-[#E2E8F0] rounded-lg focus:ring-2 focus:ring-[#0B63D6] focus:border-transparent"
-                  value={employeeSearch}
-                  onChange={(e) => setEmployeeSearch(e.target.value)}
-                />
-                {employeeSearch && (
-                  <button
-                    onClick={() => setEmployeeSearch('')}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[#64748B] hover:text-[#0F1724]"
-                  >
-                    ×
-                  </button>
+                {filteredEmployees.length === 0 ? (
+                  <Card>
+                    <CardContent className="flex flex-col items-center justify-center py-12">
+                      <Users className="h-12 w-12 text-muted-foreground mb-4 opacity-50" />
+                      <p className="text-muted-foreground">
+                        {employeeSearch || employeeRoleFilter !== 'all'
+                          ? 'No employees match your search criteria.'
+                          : 'No employees available.'}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Employee</TableHead>
+                          <TableHead>Employee ID</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>Last Login</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredEmployees.map((employee) => (
+                          <TableRow key={employee.id}>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarFallback className="text-xs">
+                                    {getInitials(employee.full_name)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <p className="font-medium">{employee.full_name}</p>
+                                  <p className="text-sm text-muted-foreground">{employee.email}</p>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <code className="text-sm">{employee.emp_id}</code>
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={employee.role === 'admin' ? 'bg-accent-purple text-accent-purple-foreground' : 'bg-accent-indigo text-accent-indigo-foreground'}>
+                                {employee.role}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {employee.last_login_at ? formatLastLoginDate(employee.last_login_at) : 'Never'}
+                            </TableCell>
+                            <TableCell>
+                              {employee.is_active ? (
+                                <Badge className="bg-accent-green text-accent-green-foreground">Active</Badge>
+                              ) : (
+                                <Badge className="bg-accent-red text-accent-red-foreground">Inactive</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setEditingEmployee(employee);
+                                    setShowEmployeeForm(true);
+                                  }}
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => deleteEmployee(employee.id, employee.full_name)}
+                                  disabled={employee.id === session?.employee.id}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
-              </div>
-              <div className="sm:w-48 relative">
-                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#64748B]" />
-                <select
-                  className="w-full pl-10 pr-4 py-2 border border-[#E2E8F0] rounded-lg focus:ring-2 focus:ring-[#0B63D6] focus:border-transparent appearance-none bg-white"
-                  value={employeeRoleFilter}
-                  onChange={(e) => setEmployeeRoleFilter(e.target.value as any)}
-                >
-                  <option value="all">All Roles</option>
-                  <option value="admin">Admin</option>
-                  <option value="employee">Employee</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Employee Stats and Clear Filters */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4 text-sm text-[#64748B]">
-                <span>Total: {filteredEmployees.length}</span>
-                <span className="text-[#10B981]">Active: {filteredEmployees.filter(e => e.is_active).length}</span>
-                <span className="text-[#EF4444]">Inactive: {filteredEmployees.filter(e => !e.is_active).length}</span>
-                {employeeRoleFilter !== 'all' && (
-                  <span className="text-[#3B82F6]">{employeeRoleFilter}: {filteredEmployees.filter(e => e.role === employeeRoleFilter).length}</span>
-                )}
-              </div>
-              {(employeeSearch || employeeRoleFilter !== 'all') && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setEmployeeSearch('');
-                    setEmployeeRoleFilter('all');
-                  }}
-                >
-                  Clear Filters
-                </Button>
-              )}
-            </div>
-
-            <div className="grid gap-4">
-              {filteredEmployees.length === 0 ? (
-                <Card>
-                  <div className="text-center py-8 text-[#64748B]">
-                    {employeeSearch || employeeRoleFilter !== 'all' 
-                      ? 'No employees match your search criteria.' 
-                      : 'No employees available.'}
-                  </div>
-                </Card>
-              ) : (
-                filteredEmployees.map((employee) => (
-                <Card key={employee.id}>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-lg font-semibold text-[#0F1724]">{employee.full_name}</h3>
-                        <Badge variant={employee.is_active ? 'success' : 'error'}>
-                          {employee.is_active ? 'Active' : 'Inactive'}
-                        </Badge>
-                        <Badge variant={employee.role === 'admin' ? 'info' : 'neutral'}>
-                          {employee.role}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-4 text-sm text-[#64748B]">
-                        <span>ID: {employee.emp_id}</span>
-                        <span>Email: {employee.email}</span>
-                        <span>Department: {employee.department || 'Not set'}</span>
-                        {employee.last_login_at && (
-                          <span>Last login: {formatLastLoginDate(employee.last_login_at)}</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                          setEditingEmployee(employee);
-                          setShowEmployeeForm(true);
-                        }}
-                      >
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      {employee.is_active ? (
-                        employee.id !== session?.employee.id && (
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            onClick={() => deleteEmployee(employee.id, employee.full_name)}
-                            title="Deactivate Employee"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        )
-                      ) : (
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => reactivateEmployee(employee.id, employee.full_name)}
-                          title="Reactivate Employee"
-                        >
-                          <Power className="w-4 h-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </Card>
-                ))
-              )}
-            </div>
+              </TabsContent>
+            </Tabs>
           </div>
-        )}
+        </main>
+      </div>
 
-        {activeTab === 'overview' && (
-          <Card className="bg-[#FEF3C7] border-[#F59E0B]">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-6 h-6 text-[#F59E0B] flex-shrink-0" />
-              <div>
-                <h3 className="font-semibold text-[#0F1724] mb-1">Security Notice</h3>
-                <p className="text-sm text-[#64748B]">
-                  All administrative actions are logged and monitored. Ensure compliance with security policies
-                  when managing user sessions and accessing sensitive data.
-                </p>
-              </div>
-            </div>
-          </Card>
-        )}
-      </main>
+      {/* Course Form Dialog */}
+      <CourseFormDialog
+        open={showCourseForm}
+        onOpenChange={setShowCourseForm}
+        course={editingCourse}
+        onSubmit={(data) => {
+          if (editingCourse) {
+            updateCourse(editingCourse.id, data);
+          } else {
+            createCourse(data);
+          }
+        }}
+        onCancel={() => {
+          setShowCourseForm(false);
+          setEditingCourse(null);
+        }}
+      />
 
-      {/* Course Form Modal */}
-      {showCourseForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h3 className="text-xl font-bold text-[#0F1724] mb-4">
-              {editingCourse ? 'Edit Course' : 'Add New Course'}
-            </h3>
-            <CourseForm
-              course={editingCourse}
-              onSubmit={editingCourse ?
-                (data) => updateCourse(editingCourse.id, data) :
-                createCourse
-              }
-              onCancel={() => {
-                setShowCourseForm(false);
-                setEditingCourse(null);
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Employee Form Modal */}
-      {showEmployeeForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md">
-            <h3 className="text-xl font-bold text-[#0F1724] mb-4">
-              {editingEmployee ? 'Edit Employee' : 'Add New Employee'}
-            </h3>
-            <EmployeeForm
-              employee={editingEmployee}
-              onSubmit={editingEmployee ?
-                (data) => updateEmployee(editingEmployee.id, data) :
-                createEmployee
-              }
-              onCancel={() => {
-                setShowEmployeeForm(false);
-                setEditingEmployee(null);
-              }}
-            />
-          </div>
-        </div>
-      )}
-    </div>
+      {/* Employee Form Dialog */}
+      <EmployeeFormDialog
+        open={showEmployeeForm}
+        onOpenChange={setShowEmployeeForm}
+        employee={editingEmployee}
+        onSubmit={(data) => {
+          if (editingEmployee) {
+            updateEmployee(editingEmployee.id, data);
+          } else {
+            createEmployee(data as any);
+          }
+        }}
+        onCancel={() => {
+          setShowEmployeeForm(false);
+          setEditingEmployee(null);
+        }}
+      />
+    </SidebarProvider>
   );
 }
 
-// Course Form Component
-function CourseForm({
+// Course Form Dialog Component
+function CourseFormDialog({
+  open,
+  onOpenChange,
   course,
   onSubmit,
-  onCancel
+  onCancel,
 }: {
-  course?: Course | null;
-  onSubmit: (data: any) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  course: Course | null;
+  onSubmit: (data: Partial<Course>) => void;
   onCancel: () => void;
 }) {
-  const [formData, setFormData] = useState({
-    title: course?.title || '',
-    description: course?.description || '',
-    category: course?.category || '',
-    difficulty_level: course?.difficulty_level || 'beginner',
-    estimated_duration_minutes: course?.estimated_duration_minutes || 0,
-    is_published: course?.is_published || false,
-    display_order: course?.display_order || 0,
+  const [formData, setFormData] = useState<Partial<Course>>({
+    title: '',
+    description: '',
+    category: '',
+    difficulty_level: 'beginner',
+    estimated_duration_minutes: 0,
+    is_published: false,
+    display_order: 0,
   });
+
+  useEffect(() => {
+    if (course) {
+      setFormData(course);
+    } else {
+      setFormData({
+        title: '',
+        description: '',
+        category: '',
+        difficulty_level: 'beginner',
+        estimated_duration_minutes: 0,
+        is_published: false,
+        display_order: 0,
+      });
+    }
+  }, [course, open]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1051,185 +1213,254 @@ function CourseForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <Input
-        label="Course Title"
-        value={formData.title}
-        onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-        required
-      />
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{course ? 'Edit Course' : 'Add New Course'}</DialogTitle>
+          <DialogDescription>
+            {course ? 'Update course information' : 'Create a new course for the learning platform'}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="title">Course Title *</Label>
+            <Input
+              id="title"
+              value={formData.title}
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              required
+            />
+          </div>
 
-      <div>
-        <label className="block text-sm font-medium text-[#0F1724] mb-2">Description</label>
-        <textarea
-          className="w-full px-4 py-3 border border-[#E2E8F0] rounded-lg focus:ring-2 focus:ring-[#0B63D6] focus:border-transparent"
-          rows={3}
-          value={formData.description}
-          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-        />
-      </div>
+          <div className="space-y-2">
+            <Label htmlFor="description">Description *</Label>
+            <textarea
+              id="description"
+              className="w-full min-h-[100px] px-3 py-2 border rounded-md"
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              required
+            />
+          </div>
 
-      <Input
-        label="Category"
-        value={formData.category}
-        onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-      />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="category">Category *</Label>
+              <Input
+                id="category"
+                value={formData.category}
+                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                required
+              />
+            </div>
 
-      <div>
-        <label className="block text-sm font-medium text-[#0F1724] mb-2">Difficulty Level</label>
-        <select
-          className="w-full px-4 py-3 border border-[#E2E8F0] rounded-lg focus:ring-2 focus:ring-[#0B63D6] focus:border-transparent"
-          value={formData.difficulty_level}
-          onChange={(e) => setFormData({ ...formData, difficulty_level: e.target.value as 'beginner' | 'intermediate' | 'advanced' })}
-        >
-          <option value="beginner">Beginner</option>
-          <option value="intermediate">Intermediate</option>
-          <option value="advanced">Advanced</option>
-        </select>
-      </div>
+            <div className="space-y-2">
+              <Label htmlFor="difficulty">Difficulty Level *</Label>
+              <Select
+                value={formData.difficulty_level}
+                onValueChange={(value) => setFormData({ ...formData, difficulty_level: value as any })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="beginner">Beginner</SelectItem>
+                  <SelectItem value="intermediate">Intermediate</SelectItem>
+                  <SelectItem value="advanced">Advanced</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
-      <Input
-        label="Duration (minutes)"
-        type="number"
-        value={formData.estimated_duration_minutes}
-        onChange={(e) => setFormData({ ...formData, estimated_duration_minutes: parseInt(e.target.value) || 0 })}
-      />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="duration">Duration (minutes) *</Label>
+              <Input
+                id="duration"
+                type="number"
+                value={formData.estimated_duration_minutes}
+                onChange={(e) => setFormData({ ...formData, estimated_duration_minutes: parseInt(e.target.value) })}
+                required
+              />
+            </div>
 
-      <Input
-        label="Display Order"
-        type="number"
-        value={formData.display_order}
-        onChange={(e) => setFormData({ ...formData, display_order: parseInt(e.target.value) || 0 })}
-      />
+            <div className="space-y-2">
+              <Label htmlFor="order">Display Order</Label>
+              <Input
+                id="order"
+                type="number"
+                value={formData.display_order}
+                onChange={(e) => setFormData({ ...formData, display_order: parseInt(e.target.value) })}
+              />
+            </div>
+          </div>
 
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          id="is_published"
-          checked={formData.is_published}
-          onChange={(e) => setFormData({ ...formData, is_published: e.target.checked })}
-          className="rounded border-[#E2E8F0] text-[#0B63D6] focus:ring-[#0B63D6]"
-        />
-        <label htmlFor="is_published" className="text-sm font-medium text-[#0F1724]">
-          Published (visible to employees)
-        </label>
-      </div>
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id="published"
+              checked={formData.is_published}
+              onChange={(e) => setFormData({ ...formData, is_published: e.target.checked })}
+              className="rounded"
+            />
+            <Label htmlFor="published" className="cursor-pointer">Publish course immediately</Label>
+          </div>
 
-      <div className="flex gap-3 pt-4">
-        <Button type="submit" fullWidth>
-          {course ? 'Update Course' : 'Create Course'}
-        </Button>
-        <Button type="button" variant="secondary" fullWidth onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-    </form>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button type="submit">
+              {course ? 'Update Course' : 'Create Course'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-// Employee Form Component
-function EmployeeForm({
+// Employee Form Dialog Component
+function EmployeeFormDialog({
+  open,
+  onOpenChange,
   employee,
   onSubmit,
-  onCancel
+  onCancel,
 }: {
-  employee?: Employee | null;
-  onSubmit: (data: any) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  employee: Employee | null;
+  onSubmit: (data: Partial<Employee> & { password?: string }) => void;
   onCancel: () => void;
 }) {
-  const [formData, setFormData] = useState({
-    emp_id: employee?.emp_id || '',
-    email: employee?.email || '',
-    full_name: employee?.full_name || '',
-    department: employee?.department || '',
-    role: employee?.role || 'employee',
-    is_active: employee?.is_active ?? true,
-    password: '', // Only for new employees
+  const [formData, setFormData] = useState<Partial<Employee> & { password?: string }>({
+    emp_id: '',
+    full_name: '',
+    email: '',
+    role: 'employee',
+    is_active: true,
+    password: '',
   });
+
+  useEffect(() => {
+    if (employee) {
+      setFormData({
+        emp_id: employee.emp_id,
+        full_name: employee.full_name,
+        email: employee.email,
+        role: employee.role,
+        is_active: employee.is_active,
+      });
+    } else {
+      setFormData({
+        emp_id: '',
+        full_name: '',
+        email: '',
+        role: 'employee',
+        is_active: true,
+        password: '',
+      });
+    }
+  }, [employee, open]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!employee && !formData.password) {
-      alert('Password is required for new employees');
-      return;
-    }
     onSubmit(formData);
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <Input
-        label="Employee ID"
-        value={formData.emp_id}
-        onChange={(e) => setFormData({ ...formData, emp_id: e.target.value })}
-        required
-        disabled={!!employee} // Can't change EMP_ID after creation
-      />
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{employee ? 'Edit Employee' : 'Add New Employee'}</DialogTitle>
+          <DialogDescription>
+            {employee ? 'Update employee information' : 'Create a new employee account'}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="emp_id">Employee ID *</Label>
+            <Input
+              id="emp_id"
+              value={formData.emp_id}
+              onChange={(e) => setFormData({ ...formData, emp_id: e.target.value })}
+              disabled={!!employee}
+              required
+            />
+          </div>
 
-      <Input
-        label="Full Name"
-        value={formData.full_name}
-        onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-        required
-      />
+          <div className="space-y-2">
+            <Label htmlFor="full_name">Full Name *</Label>
+            <Input
+              id="full_name"
+              value={formData.full_name}
+              onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+              required
+            />
+          </div>
 
-      <Input
-        label="Email"
-        type="email"
-        value={formData.email}
-        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-        required
-      />
+          <div className="space-y-2">
+            <Label htmlFor="email">Email *</Label>
+            <Input
+              id="email"
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              required
+            />
+          </div>
 
-      <Input
-        label="Department"
-        value={formData.department}
-        onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-      />
+          {!employee && (
+            <div className="space-y-2">
+              <Label htmlFor="password">Password *</Label>
+              <Input
+                id="password"
+                type="password"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                required
+              />
+            </div>
+          )}
 
-      {!employee && (
-        <Input
-          label="Password"
-          type="password"
-          value={formData.password}
-          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-          required
-        />
-      )}
+          <div className="space-y-2">
+            <Label htmlFor="role">Role *</Label>
+            <Select
+              value={formData.role}
+              onValueChange={(value) => setFormData({ ...formData, role: value as any })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="employee">Employee</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-      <div>
-        <label className="block text-sm font-medium text-[#0F1724] mb-2">Role</label>
-        <select
-          className="w-full px-4 py-3 border border-[#E2E8F0] rounded-lg focus:ring-2 focus:ring-[#0B63D6] focus:border-transparent"
-          value={formData.role}
-          onChange={(e) => setFormData({ ...formData, role: e.target.value as 'employee' | 'admin' })}
-        >
-          <option value="employee">Employee</option>
-          <option value="admin">Admin</option>
-        </select>
-      </div>
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id="is_active"
+              checked={formData.is_active}
+              onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+              className="rounded"
+            />
+            <Label htmlFor="is_active" className="cursor-pointer">Active account</Label>
+          </div>
 
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          id="is_active"
-          checked={formData.is_active}
-          onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-          className="rounded border-[#E2E8F0] text-[#0B63D6] focus:ring-[#0B63D6]"
-        />
-        <label htmlFor="is_active" className="text-sm font-medium text-[#0F1724]">
-          Active Account
-        </label>
-      </div>
-
-      <div className="flex gap-3 pt-4">
-        <Button type="submit" fullWidth>
-          {employee ? 'Update Employee' : 'Create Employee'}
-        </Button>
-        <Button type="button" variant="secondary" fullWidth onClick={onCancel}>
-          Cancel
-        </Button>
-      </div>
-    </form>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button type="submit">
+              {employee ? 'Update Employee' : 'Create Employee'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

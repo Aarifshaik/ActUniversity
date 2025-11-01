@@ -325,6 +325,124 @@ app.get('/api/auth/validate', authenticateToken, async (req, res) => {
 
 // ADMIN ENDPOINTS
 
+// Admin force logout endpoint
+app.post('/api/admin/sessions/:sessionId/force-logout', authenticateToken, async (req, res) => {
+  console.log('Force logout request received:', {
+    admin_employee_id: req.employeeId,
+    target_session_id: req.params.sessionId,
+    ip_address: getClientIP(req)
+  });
+  try {
+    // Verify admin role
+    const { data: employee } = await supabase
+      .from('employees')
+      .select('role')
+      .eq('id', req.employeeId)
+      .single();
+
+    if (!employee || employee.role !== 'admin') {
+      await supabase.from('audit_logs').insert({
+        employee_id: req.employeeId,
+        event_type: 'force_logout_unauthorized',
+        event_category: 'security',
+        resource_type: 'session',
+        resource_id: req.params.sessionId,
+        action_details: { reason: 'Non-admin user attempted force logout' },
+        ip_address: getClientIP(req),
+        user_agent: req.headers['user-agent'],
+        severity: 'warning'
+      });
+
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+
+    const { sessionId } = req.params;
+
+    // Get current admin's session token to prevent self-logout
+    const currentSessionToken = req.headers.authorization.replace('Bearer ', '');
+    const { data: currentSession } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('session_token', currentSessionToken)
+      .single();
+
+    // Prevent admin from force-logging out their own current session
+    if (currentSession && currentSession.id === sessionId) {
+      await supabase.from('audit_logs').insert({
+        employee_id: req.employeeId,
+        event_type: 'force_logout_self_attempt',
+        event_category: 'security',
+        resource_type: 'session',
+        resource_id: sessionId,
+        action_details: { reason: 'Admin attempted to force logout their own current session' },
+        ip_address: getClientIP(req),
+        user_agent: req.headers['user-agent'],
+        severity: 'warning'
+      });
+
+      return res.status(400).json({ 
+        message: 'Cannot force logout your own current session. Use regular logout instead.',
+        code: 'SELF_SESSION_LOGOUT_DENIED'
+      });
+    }
+
+    // Get session details before deactivating
+    const { data: targetSession } = await supabase
+      .from('sessions')
+      .select('*, employees(emp_id, full_name)')
+      .eq('id', sessionId)
+      .single();
+
+    if (!targetSession) {
+      return res.status(404).json({ message: 'Session not found' });
+    }
+
+    // Deactivate the session using service role key
+    const { error } = await supabase
+      .from('sessions')
+      .update({
+        is_active: false,
+        logout_reason: 'admin_forced'
+      })
+      .eq('id', sessionId);
+
+    if (error) {
+      console.error('Force logout error:', error);
+      return res.status(500).json({ 
+        message: 'Failed to force logout',
+        error: error.message 
+      });
+    }
+
+    // Log audit event
+    await supabase.from('audit_logs').insert({
+      employee_id: req.employeeId,
+      session_id: sessionId,
+      event_type: 'force_logout',
+      event_category: 'admin',
+      resource_type: 'session',
+      resource_id: sessionId,
+      action_details: { 
+        reason: 'Forced by admin',
+        target_employee_id: targetSession.employee_id,
+        target_employee_name: targetSession.employees?.full_name
+      },
+      ip_address: getClientIP(req),
+      user_agent: req.headers['user-agent'] || '',
+      severity: 'warning',
+    });
+
+    res.json({ 
+      success: true,
+      message: 'Session terminated successfully' 
+    });
+
+  } catch (error) {
+    console.error('Force logout error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 // Admin stats endpoint
 app.get('/api/admin/stats', authenticateToken, async (req, res) => {
   console.log('Admin Stats request received:', {

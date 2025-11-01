@@ -5,6 +5,7 @@ import { AdminDashboard } from './pages/AdminDashboard';
 import { ActivityPlayer } from './pages/ActivityPlayer';
 import { getStoredSession, validateSession, isAdmin } from './lib/auth';
 import { setupCSP, preventDevTools, preventScreenCapture, detectAutomation } from './lib/security';
+import { ThemeProvider } from './components/theme-provider';
 
 type Page = 'login' | 'dashboard' | 'admin' | 'activity';
 
@@ -83,33 +84,33 @@ function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F7FAFC] flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0B63D6] mx-auto mb-4"></div>
-          <p className="text-[#64748B]">Loading Act University...</p>
+      <ThemeProvider defaultTheme="light" defaultPalette="blue">
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading Act University...</p>
+          </div>
         </div>
-      </div>
+      </ThemeProvider>
     );
   }
 
-  if (!isAuthenticated) {
-    return <Login onLoginSuccess={handleLoginSuccess} />;
-  }
-
-  if (currentPage === 'admin') {
-    return <AdminDashboard />;
-  }
-
-  if (currentPage === 'activity' && selectedActivityId) {
-    return (
-      <ActivityPlayer
-        activityId={selectedActivityId}
-        onBack={() => navigateTo('dashboard')}
-      />
-    );
-  }
-
-  return <Dashboard />;
+  return (
+    <ThemeProvider defaultTheme="light" defaultPalette="blue">
+      {!isAuthenticated ? (
+        <Login onLoginSuccess={handleLoginSuccess} />
+      ) : currentPage === 'admin' ? (
+        <AdminDashboard />
+      ) : currentPage === 'activity' && selectedActivityId ? (
+        <ActivityPlayer
+          activityId={selectedActivityId}
+          onBack={() => navigateTo('dashboard')}
+        />
+      ) : (
+        <Dashboard />
+      )}
+    </ThemeProvider>
+  );
 }
 
 export default App;
